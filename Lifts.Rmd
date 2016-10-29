@@ -1,0 +1,147 @@
+---
+title: "Lifts"
+author: "Itnava"
+date: "October 27, 2016"
+output: html_document
+---
+
+###The Problem Statement:
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+###Data
+
+The training data for this project are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har. If you use the document you create for this class for any purpose please cite them as they have been very generous in allowing their data to be used for this kind of assignment.
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+###Methodology
+Downloading the files needed:
+
+```{r downloadFiles, include = FALSE}
+download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv", "pml-training.csv")
+
+download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv", "pml-testing.csv")
+```
+Loading the necessary libraries
+```{r libraries, include = FALSE}
+library(caret)
+library(plyr)
+library(dplyr)
+library(rpart)
+library(ggplot2)
+library(Hmisc)
+library(gbm)
+library(randomForest)
+set.seed(12345)
+```
+
+Loading and checking the data:
+```{r loading} 
+testing <- read.csv("pml-testing.csv")
+training <- read.csv("pml-training.csv")
+dim(training)
+dim(testing)
+```
+
+```{r describepara, include = FALSE}
+describe(training)
+```
+The dataset looks very big, the output for "describe" was suppressed for brevity. A number of columns have more than 19000 missing entries. We can test what data we will have if we exclude rows with NAs or columns with NAs.
+
+```{r nacols}
+dim(training[complete.cases(training),])
+dim(training[colSums(!is.na(training)) > 0.5 * length(training[,1])])
+```
+
+Based on this, we see, we retain more data if we filter out columns with missing data. We will exclude all columns where more than 50% of the entries are missing. 
+
+```{r filteringdata}
+trainingData <- training[colSums(!is.na(training)) > 0.5 * length(training[,1])]
+dim(trainingData)
+```
+
+The test dataset contains only 20 rows. Our training dataset is big enough that we can split it into a training and test set. This way we can test different models and assess the best fit. 
+
+```{r partitioning}
+
+inTrain <- createDataPartition(trainingData$classe, p = 0.6, list = FALSE)
+trainSet <- trainingData[inTrain, ]
+testSet <- trainingData[-inTrain, ]
+```
+
+The first seven columns contain information about the routine followed, date, start time etc. Since we want to use motion sensor information, rather than behavior to predict quality of lifts, we can exclude these variables in this analysis. For a different kind of analysis, behavior patterns could be more useful. 
+```{r motionvar}
+
+trainSet <- trainSet[,7:93]
+dim(trainSet)
+
+testSet <- testSet[,7:93]
+dim(testSet)
+```
+
+We can also filter out any columns with suspiciously low variance. We use nearZeroVar, to remove these. 
+
+```{r zerovarcomp}
+
+finalTrain <- trainSet[-nearZeroVar(trainSet)]
+finalTest <- testSet[-nearZeroVar(trainSet)]
+dim(finalTest)
+c(colnames(finalTest) == colnames(finalTrain))
+
+```
+The last command confirms we have the same columns in our test and train sets. It seems like all the columns of class factor have been dropped. 
+
+Next we train three different classification models using our training data and use them to predict the output of our test set.
+
+```{r modeltrains, include =FALSE}
+rpartModel <- train(classe ~., data= finalTrain, method = "rpart")
+rfModel <- train(classe ~., data = finalTrain, method = "rf")
+gbmModel <- train(classe ~., data = finalTrain, method = "gbm")
+
+rpartPredict <- predict(rpartModel, finalTest)
+rfPredict <- predict(rfModel, finalTest)
+gbmPredict <- predict(gbmModel, finalTest)
+
+```
+We can assess the fit quality from the confusion matrices. 
+
+```{r fitquality}
+confusionMatrix(rpartPredict, finalTest$classe)
+confusionMatrix(rfPredict, finalTest$classe)
+confusionMatrix(gbmPredict, finalTest$classe)
+
+```
+
+We find that the RPart model does not give a good fit, with accuracy ~0.5. But Random Forest and Gradient Boost both give a very good fit for the test set, with less than 0.02% out of sample error. 
+
+We apply both models to the original test set. It has to be transformed the same way as the training set. 
+
+```{r testing}
+
+final <- testing[which(c(colnames(testing)) %in% c(colnames(finalTrain)))]
+dim(final)
+
+testingrf <- predict(rfModel, final)
+testingrf
+
+testinggbm <- predict(gbmModel, final)
+testinggbm
+```
+
+The outputs are in agreement. 
+
+The final answer for the 20 test cases:
+
+B A B A A E D B A A B C B A E E A B B B
